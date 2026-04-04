@@ -22,7 +22,6 @@
       d="M4.5 20.25a7.5 7.5 0 0115 0"
     />
   </svg>
-
 </template>
 
 <style scoped>

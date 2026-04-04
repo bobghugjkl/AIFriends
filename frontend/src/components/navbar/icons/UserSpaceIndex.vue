@@ -32,7 +32,6 @@
       d="M9 21.75V15a3 3 0 016 0v6.75"
     />
   </svg>
-
 </template>
 
 <style scoped>
