@@ -12,7 +12,82 @@
 
 ---
 
-## 二、项目目录结构
+## 二、使用了什么技术
+
+| 层级 | 技术 | 版本 | 用途 |
+|------|------|------|------|
+| 后端框架 | Django | 6.0.1 | Python Web 框架，处理 HTTP 请求、ORM、模板渲染 |
+| API 框架 | Django REST Framework (DRF) | — | 构建 RESTful API，序列化、认证、权限 |
+| 认证 | djangorestframework-simplejwt | — | JWT 令牌认证（Access Token + Refresh Token） |
+| 跨域 | django-cors-headers | — | 允许前端 localhost:5173 跨域请求后端 localhost:8000 |
+| 数据库 | SQLite3 | — | 文件型数据库，零配置，适合开发和小项目 |
+| 前端框架 | Vue 3 | 3.5.26 | 渐进式 JavaScript 框架，组件化开发 |
+| 前端路由 | Vue Router | 4.6.4 | SPA 页面路由，History 模式（SPA是什么？简单说就是"单页应用"——整个网站只有一个HTML页面，点击链接时浏览器不刷新，而是用JavaScript偷偷换掉页面内容，体验像手机App一样流畅） |
+| 状态管理 | Pinia | 3.0.4 | Vue 3 官方状态管理库 |
+| 构建工具 | Vite | 7.3.0 | 极速开发服务器 + 生产打包 |
+| 图标 | SVG 内联 | — | 各个 icon 用纯 SVG 写在 .vue 组件中 |
+
+---
+
+## 三、整体架构
+
+### 3.1 前后端协作方式
+
+```
+开发阶段：
+  浏览器 (localhost:5173) ──→ Vite Dev Server ──→ 代理 API 请求 ──→ Django (localhost:8000)
+  
+生产阶段：
+  浏览器 ──→ Django (localhost:8000)
+                ├── /api/*  → DRF 处理 JSON 响应
+                ├── /admin/ → Django Admin 后台
+                └── /*      → 返回 index.html → Vue 接管 → SPA 路由
+```
+
+### 3.2 Django 内部请求处理流程
+
+```
+浏览器请求
+    │
+    ▼
+urls.py (根路由) ─── 匹配 URL ───┬── /admin/  → Django Admin
+                                 ├── /api/*   → web/urls.py → 具体视图
+                                 └── /*       → index 视图 → index.html
+                                 
+视图 (views/*.py)
+    │
+    ├── 解析请求 (request.data / request.FILES)
+    ├── 查数据库 (Model.objects.filter/get/create)
+    ├── 调用外部服务 (AI API、TTS、ASR)
+    └── 返回 Response (JSON)
+```
+
+### 3.3 Vue 前端渲染流程
+
+```
+index.html 加载
+    │
+    ▼
+main.js 执行
+    ├── createApp(App.vue)    创建 Vue 实例
+    ├── app.use(createPinia()) 安装状态管理
+    ├── app.use(router)        安装路由
+    └── app.mount('#app')      挂载到 DOM
+            │
+            ▼
+        App.vue (根组件)
+            ├── NavBar (导航栏，始终显示)
+            └── <RouterView /> (根据 URL 动态渲染页面)
+                    │
+                    ├── / → HomepageIndex
+                    ├── /friend/ → FriendIndex
+                    ├── /create/ → CreateIndex
+                    └── /user/... → LoginIndex / RegisterIndex / SpaceIndex / ProfileIndex
+```
+
+---
+
+## 四、项目目录结构
 
 ```
 项目根目录/
@@ -234,14 +309,14 @@ CORS_ALLOWED_ORIGINS = [
 - `django.contrib.staticfiles` —— 静态文件管理（CSS、JS、图片）。
 - `rest_framework` —— **DRF（Django REST Framework）**，用于构建 API。这不是 Django 自带的，需要 `pip install djangorestframework`。
 - `web` —— 我们自己的应用（`backend/web/` 目录）。
-- `corsheaders` —— **django-cors-headers**，处理跨域请求。前端在 `localhost:5173`，后端在 `localhost:8000`，不同端口也算跨域。没有这个，前端请求后端会被浏览器拦截。
+- `corsheaders` —— **django-cors-headers**，处理跨域请求。前端在 `localhost:5173`，后端在 `localhost:8000`，不同端口也算跨域。没有这个，前端请求后端会被浏览器拦截。（什么是跨域？简单说，浏览器有个安全规则叫"同源策略"——默认情况下，一个网站上的JavaScript只能请求同一个地址的数据。比如你在`localhost:5173`打开的页面上写代码请求`localhost:8000`，浏览器一看端口不一样（5173 vs 8000），就认为是"跨域"了，直接拦截掉。CORS就是服务器主动告诉浏览器："我允许5173那个端口来访问我"，浏览器收到这个许可才会放行。打个比方：你家的门禁（浏览器）默认不让陌生人进，CORS就是你在门上贴了张纸条"允许快递员进来"）
 
-**MIDDLEWARE 段**：中间件是请求/响应处理管道中的一道道"关卡"，请求进来和响应出去都会依次经过这些中间件。
+**MIDDLEWARE 段**：中间件是请求/响应处理管道中的一道道"关卡"，请求进来和响应出去都会依次经过这些中间件。（打个比方：就像工厂的流水线——一个产品（请求）从传送带一头进来，经过A工位（安全检查）→ B工位（贴标签）→ C工位（认证身份）→ 到达最终处理器→然后响应再沿着传送带原路返回。每个工位就是一层"中间件"，它们不负责生产产品本身，但在产品流通的过程中做辅助工作。中间件的顺序很重要——比如CORS中间件必须排第一，因为如果连跨域检查都没通过，后面的工位就没必要干活了）
 - `CorsMiddleware` 放在最前面——跨域处理必须最先拦截请求。
 - `SecurityMiddleware` —— 安全相关的 HTTP 头（HSTS、X-Content-Type-Options 等）。
 - `SessionMiddleware` —— 为每个用户创建 session。
 - `CommonMiddleware` —— 常见的处理（URL 尾部斜杠重定向、禁止某些 User-Agent 等）。
-- `CsrfViewMiddleware` —— CSRF 保护，防止跨站请求伪造攻击。
+- `CsrfViewMiddleware` —— CSRF 保护，防止跨站请求伪造攻击。（CSRF是什么？假设你登录了银行网站，浏览器里存了登录cookie。这时候你打开另一个标签页，不小心点开了一个恶意网站。那个恶意网站在背后偷偷向银行网站发了一个"转账"请求——因为你的cookie还在，银行以为是你本人操作的，钱就转走了。CSRF保护就是在银行的表单里塞一个隐藏的随机令牌，恶意网站猜不到这个令牌，请求就会被拒绝。简单说：CSRF保护确保"提交到服务器的请求，一定是服务器自己发的表单产生的"，而不是别的网站伪造的）
 - `AuthenticationMiddleware` —— 把用户对象附加到 request 上。
 - `MessageMiddleware` —— 消息框架支持。
 - `XFrameOptionsMiddleware` —— 防止页面被嵌入 iframe（防点击劫持）。
@@ -270,7 +345,7 @@ CORS_ALLOWED_ORIGINS = [
 - `MEDIA_URL` —— 用户上传文件的 URL 前缀。`MEDIA_ROOT` 是文件实际存储位置。
 
 **JWT 认证配置**：
-- `REST_FRAMEWORK` 的 `DEFAULT_AUTHENTICATION_CLASSES` —— 配置 DRF 使用 JWT 认证。JWT（JSON Web Token）是一种**无状态**认证方式：用户登录后服务器返回一个加密 token，之后每次请求带上这个 token，服务器通过解析 token 来确认用户身份，不需要在服务器存 session。
+- `REST_FRAMEWORK` 的 `DEFAULT_AUTHENTICATION_CLASSES` —— 配置 DRF 使用 JWT 认证。JWT（JSON Web Token）是一种**无状态**认证方式：用户登录后服务器返回一个加密 token，之后每次请求带上这个 token，服务器通过解析 token 来确认用户身份，不需要在服务器存 session。（什么是"无状态"？传统登录方式是服务器在内存里记一个"张三已登录"的小本本（这叫session，是有状态的），但服务器一重启小本本就丢了。JWT的思路不同——服务器不记小本本，而是给用户发一张"加密身份证"（token），用户每次来都揣着这张证，服务器看一眼证就能确认身份，不需要翻小本本。好处是服务器重启不受影响，多台服务器也不需要共享session。打个比方：传统session就像你去超市存包——超市给你一个号码牌，你凭牌取包，但超市要记录"这个号码对应哪个柜子"；JWT就像你随身带身份证——走到哪掏出来就行，不需要超市帮你存任何东西）
 - `SIMPLE_JWT` 详细配置：
   - `ACCESS_TOKEN_LIFETIME` = 2 小时——登录令牌有效期。短有效期更安全。
   - `REFRESH_TOKEN_LIFETIME` = 7 天——刷新令牌有效期。Access Token 过期后用 Refresh Token 换新的，不用重新登录。
@@ -362,7 +437,19 @@ from django.contrib import admin
 
 ---
 
-### 3.6 `backend/web/apps.py`——应用配置
+### 3.6 `backend/web/tests.py`——测试文件
+
+```python
+from django.test import TestCase
+
+# Create your tests here.
+```
+
+目前只包含 Django 自动生成的模板代码，没有任何实际测试逻辑。后续提交中会逐渐添加真实测试。
+
+---
+
+### 3.8 `backend/web/apps.py`——应用配置
 
 ```python
 from django.apps import AppConfig
@@ -375,7 +462,7 @@ class WebConfig(AppConfig):
 
 ---
 
-### 3.7 `backend/web/models.py`——数据库模型
+### 3.9 `backend/web/models.py`——数据库模型
 
 ```python
 from django.db import models
@@ -383,11 +470,11 @@ from django.db import models
 # Create your models here.
 ```
 
-**讲解**：目前是空的。`models.py` 是定义数据库表的地方。Django 的 ORM（对象关系映射）允许你用 Python 类来描述数据库表，Django 会自动生成对应的 SQL。
+**讲解**：目前是空的。`models.py` 是定义数据库表的地方。Django 的 ORM（对象关系映射，Object-Relational Mapping）允许你用 Python 类来描述数据库表，Django 会自动生成对应的 SQL。（什么是ORM？简单说就是一个"翻译官"——你不用学SQL语言（`CREATE TABLE users(...)`、`SELECT * FROM users WHERE ...`这些），你用Python写`class User(models.Model): name = models.CharField(...)`，ORM自动帮你翻译成数据库能听懂的SQL语句去执行。好处有两个：一是你不用写又臭又长的SQL字符串，二是换数据库（比如从SQLite换成MySQL）时几乎不用改代码——ORM帮你处理了不同数据库的语法差异）
 
 ---
 
-### 3.8 `backend/web/urls.py`——Web 应用路由
+### 3.10 `backend/web/urls.py`——Web 应用路由
 
 ```python
 from django.urls import path
@@ -417,7 +504,7 @@ urlpatterns = [
 
 ---
 
-### 3.9 `backend/web/views/index.py`——首页视图
+### 3.11 `backend/web/views/index.py`——首页视图
 
 ```python
 from django.shortcuts import render
@@ -434,7 +521,7 @@ def index(request):
 
 ---
 
-### 3.10 `backend/web/templates/index.html`——首页模板
+### 3.12 `backend/web/templates/index.html`——首页模板
 
 ```html
 {% load static %}
@@ -464,6 +551,23 @@ def index(request):
 - `<link rel="stylesheet" crossorigin href="...">` —— 加载 Vite 打包后的 CSS 文件。
 
 **这个文件的作用**：这是生产环境的入口。Django 收到用户请求后，返回这个 HTML；HTML 加载了 Vite 打包好的 JS 和 CSS；Vue 应用启动，接管 `<div id="app">`，渲染出完整的页面。**开发阶段不需要这个文件**——Vite 有自己的开发服务器和 index.html（在 `frontend/index.html`）。
+
+---
+
+### 3.13 `main.py`——PyCharm 自动生成的示例脚本
+
+```python
+# 这是一个示例 Python 脚本。
+
+def print_hi(name):
+    print(f'Hi, {name}')
+
+
+if __name__ == '__main__':
+    print_hi('PyCharm')
+```
+
+这个文件是 PyCharm IDE 创建项目时自动生成的，与项目实际功能无关。它在第一次提交时被 `git add -A` 意外包含进来，后面会在提交 06 中被删除。
 
 ---
 
@@ -641,6 +745,70 @@ import HelloWorld from './components/HelloWorld.vue'
 
   <RouterView />
 </template>
+
+<style scoped>
+header {
+  line-height: 1.5;
+  max-height: 100vh;
+}
+
+.logo {
+  display: block;
+  margin: 0 auto 2rem;
+}
+
+nav {
+  width: 100%;
+  font-size: 12px;
+  text-align: center;
+  margin-top: 2rem;
+}
+
+nav a.router-link-exact-active {
+  color: var(--color-text);
+}
+
+nav a.router-link-exact-active:hover {
+  background-color: transparent;
+}
+
+nav a {
+  display: inline-block;
+  padding: 0 1rem;
+  border-left: 1px solid var(--color-border);
+}
+
+nav a:first-of-type {
+  border: 0;
+}
+
+@media (min-width: 1024px) {
+  header {
+    display: flex;
+    place-items: center;
+    padding-right: calc(var(--section-gap) / 2);
+  }
+
+  .logo {
+    margin: 0 2rem 0 0;
+  }
+
+  header .wrapper {
+    display: flex;
+    place-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  nav {
+    text-align: left;
+    margin-left: -1rem;
+    font-size: 1rem;
+
+    padding: 1rem 0;
+    margin-top: 1rem;
+  }
+}
+</style>
 ```
 
 **逐行讲解：**
@@ -709,7 +877,7 @@ export const useCounterStore = defineStore('counter', () => {
 **逐行讲解：**
 
 - `defineStore('counter', () => {...})` —— 定义一个名叫 `'counter'` 的 Store。Pinia 把这个 Store 注册到全局，任何组件都能调用。
-- `ref(0)` —— Vue 3 的**响应式**值。`ref` 把普通值包一层后，当值变化时所有使用了这个值的组件会自动重新渲染。`.value` 才是实际值。
+- `ref(0)` —— Vue 3 的**响应式**值。`ref` 把普通值包一层后，当值变化时所有使用了这个值的组件会自动重新渲染。`.value` 才是实际值。（什么是响应式？简单说就是"数据变了，页面自动跟着变"。想象一个电子表格——你在A1格写了`=B1+C1`，当B1或C1变化时A1会自动重新计算。Vue的`ref`就是类似的效果：你用`ref(0)`声明一个"会变的值"，然后在模板里写`{{ count }}`显示它，当`count.value`变成`1`时，页面上显示的数字自动从0变成1，你不需要手动操作DOM去更新页面。没有响应式的话，你需要写`document.getElementById('xxx').innerText = count`这种繁琐的DOM操作代码）
 - `computed(() => count.value * 2)` —— **计算属性**。`doubleCount` 自动等于 `count` 的两倍。`computed` 有缓存，依赖不变时不重新计算。
 - `return { count, doubleCount, increment }` —— 暴露给外部使用的方法和值。
 
@@ -719,7 +887,84 @@ export const useCounterStore = defineStore('counter', () => {
 
 ### 4.8 其他 Vue 组件
 
-剩下的组件（`HelloWorld.vue`、`TheWelcome.vue`、`WelcomeItem.vue`、`HomeView.vue`、`AboutView.vue` 和 icons 下的 5 个图标组件）都是 Vue CLI / create-vue 工具自动生成的**示例代码**，展示了 Vue 的功能（组件嵌套、插槽、响应式数据、路由等），不是项目真正的业务代码。后续提交会逐步替换掉。
+除了前述的核心文件，这个初始提交还包含以下由 Vue CLI / create-vue 工具自动生成的**示例代码**，用于展示 Vue 的基本功能。它们在后续提交 04 中会被全部删除。
+
+#### `HelloWorld.vue`——展示组件属性
+
+```vue
+<script setup>
+defineProps({
+  msg: {
+    type: String,
+    required: true,
+  },
+})
+</script>
+
+<template>
+  <div class="greetings">
+    <h1 class="green">{{ msg }}</h1>
+    <h3>
+      You've successfully created a project with
+      <a href="https://vite.dev/" target="_blank" rel="noopener">Vite</a> +
+      <a href="https://vuejs.org/" target="_blank" rel="noopener">Vue 3</a>.
+    </h3>
+  </div>
+</template>
+
+<style scoped>
+h1 { font-weight: 500; font-size: 2.6rem; position: relative; top: -10px; }
+h3 { font-size: 1.2rem; }
+.greetings h1, .greetings h3 { text-align: center; }
+@media (min-width: 1024px) {
+  .greetings h1, .greetings h3 { text-align: left; }
+}
+</style>
+```
+
+#### `HomeView.vue`——首页页面
+
+```vue
+<script setup>
+import TheWelcome from '../components/TheWelcome.vue'
+</script>
+
+<template>
+  <main>
+    <TheWelcome />
+  </main>
+</template>
+```
+
+#### `AboutView.vue`——关于页面
+
+```vue
+<template>
+  <div class="about">
+    <h1>This is an about page</h1>
+  </div>
+</template>
+
+<style>
+@media (min-width: 1024px) {
+  .about { min-height: 100vh; display: flex; align-items: center; }
+}
+</style>
+```
+
+#### `TheWelcome.vue`——欢迎内容容器
+
+该组件使用 `WelcomeItem` 和 5 个图标组件构建了完整的欢迎页面布局，展示了 Vue 的插槽（slot）机制。
+
+#### `WelcomeItem.vue`——列表项容器
+
+使用具名插槽 `icon` 和 `heading` 以及默认插槽，展示了 Vue 组件的组合模式。
+
+#### `icons/` 下的 5 个 SVG 图标组件
+
+`IconCommunity.vue`、`IconDocumentation.vue`、`IconEcosystem.vue`、`IconSupport.vue`、`IconTooling.vue`——每个都是一个内联 SVG 封装为 Vue 组件，展示图标复用模式。
+
+这些示例代码在提交 04 中被完整删除，其全部源代码详见 `04-删除示例代码.md`。
 
 ---
 

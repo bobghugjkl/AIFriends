@@ -12,7 +12,93 @@
 
 ---
 
-## 二、后端修 bug
+## 二、使用了什么技术
+
+| 技术/工具/库 | 用途 |
+|-------------|------|
+| Axios（create, interceptors, Promise） | HTTP 客户端，创建自定义实例，通过请求/响应拦截器自动处理 Token 注入、过期刷新和并发请求排队 |
+| Pinia Store（useUserStore） | 在拦截器中读取/更新 accessToken，配合响应拦截器自动刷新 Token 后更新 Store |
+| Vue v-model | 双向数据绑定，将登录/注册表单输入框的值与 JavaScript 响应式变量保持同步 |
+| async/await | 异步处理 HTTP 请求，使登录、注册、退出流程代码像同步代码一样顺序可读 |
+| FormData（构造函数） | 构造 multipart/form-data 格式请求体（后续用于文件上传） |
+| router.push | 编程式导航，登录/注册成功后自动跳转到首页 |
+
+## 三、整体架构 / 数据流
+
+```
+请求与 Token 刷新完整流程:
+
+  前端请求                          后端
+     │                                │
+     │  api.post('/login/', data)      │
+     ▼                                │
+┌───────────────┐                     │
+│ 请求拦截器      │                     │
+│ (request)      │                     │
+│ 检查 accessToken │                     │
+│ 有 → 添加       │                     │
+│ Authorization:  │                     │
+│ Bearer xxx     │                     │
+└───────┬───────┘                     │
+        │ 带 Token 的请求              │
+        ▼                             │
+   ┌──────────┐                      │
+   │  服务器   │                      │
+   │  验证 JWT │                      │
+   └──┬───────┘                      │
+      │                               │
+      ├─ Token 有效 ──→ 返回 200       │
+      │                               │
+      └─ Token 过期 ──→ 返回 401       │
+                             │        │
+                             ▼        │
+                    ┌──────────────────────┐
+                    │  响应拦截器 (response) │
+                    │  检测 status === 401  │
+                    └──────────┬───────────┘
+                               │
+                    ┌──────────▼───────────┐
+                    │  isRefreshing 是否为 false? │
+                    │  (防止并发刷新)        │
+                    └──────────┬───────────┘
+                               │
+                    ┌──────────▼───────────┐
+                    │  发 refresh_token 请求 │
+                    │  axios.post(         │
+                    │  '/refresh_token/',  │
+                    │  {}, {withCredentials}│
+                    │  ) ← 用原始 axios 实例│
+                    │  (避免死循环)          │
+                    └──────────┬───────────┘
+                               │
+              ┌────────────────┼────────────────┐
+              │ 成功            │                 │ 失败
+              ▼                 │                 ▼
+     ┌────────────────┐        │        ┌────────────────┐
+     │ 更新 Store 中的  │        │        │ user.logout()  │
+     │ accessToken    │        │        │ 清空用户状态     │
+     │ onRefreshed()  │        │        │ onRefreshFailed│
+     │ → 重试所有排队    │        │        │ → 所有排队请求失败│
+     │   的原始请求     │        │        │                │
+     └────────────────┘        │        └────────────────┘
+                               │
+                     并发 401 队列机制:
+
+     ┌─────────────────────────────────────────┐
+     │ 同时到达的 3 个请求都返回 401:             │
+     │                                           │
+     │  请求A ──→ 发现 401 ──→ 触发刷新 (isRefreshing=true) │
+     │  请求B ──→ 发现 401 ──→ subscribeTokenRefresh(cb)  │
+     │  请求C ──→ 发现 401 ──→ subscribeTokenRefresh(cb)  │
+     │                                           │
+     │  刷新成功后: onRefreshed(token)           │
+     │  → 执行排队回调 → 请求B和C用新 Token 重试    │
+     └─────────────────────────────────────────┘
+```
+
+---
+
+## 四、后端修 bug
 
 **文件**：`backend/web/views/user/account/login.py`
 
@@ -25,7 +111,7 @@
 
 ---
 
-## 三、引入 Axios——`package.json`
+## 五、引入 Axios——`package.json`
 
 ```diff
 +    "axios": "^1.13.2",
@@ -39,7 +125,7 @@
 
 ---
 
-## 四、核心文件：`frontend/src/js/http/api.js`——HTTP 拦截器
+## 六、核心文件：`frontend/src/js/http/api.js`——HTTP 拦截器
 
 这是本次提交最重要的文件，共 92 行。它创建了一个经过封装的 Axios 实例，自动处理 Token 注入和过期刷新。
 
@@ -79,7 +165,7 @@ api.interceptors.request.use(config => {
 
 **讲解**：
 
-- `api.interceptors.request.use(callback)` —— **请求拦截器**。每一个通过 `api` 发出的 HTTP 请求，在真正发出前都会先经过这个回调函数
+- `api.interceptors.request.use(callback)` —— **请求拦截器**。每一个通过 `api` 发出的 HTTP 请求，在真正发出前都会先经过这个回调函数。（什么是"拦截器"？就像机场安检——每个旅客（请求）在登机（发往服务器）之前都要过安检门（拦截器），安检员检查你的登机牌、帮你贴标签。响应拦截器则是出机场时的海关——旅客回来也要过一遍检查。Axios的拦截器就是让你在所有请求发出前/所有响应回来后，自动执行一段自定义逻辑，不用在每个请求里重复写"检查token、附加token"这些代码。打个比方：拦截器就像流水线上的自动贴标机——产品（请求）经过时自动贴上标签（Authorization头），工人（业务代码）不用管贴标的事，只管把产品放上传送带就行）
 - `config` —— 请求配置对象，包含 URL、method、headers 等
 - `const user = useUserStore()` —— 在拦截器中调用 Pinia Store。Pinia 内部已经初始化过，可以随时调用
 - `if (user.accessToken)` —— 如果有 Token，就附加到请求头。Bearer 是 JWT 认证的标准前缀，后端 `simplejwt` 的 `AUTH_HEADER_TYPES = ('Bearer',)` 期望的就是这个格式
@@ -187,7 +273,7 @@ api.interceptors.response.use(
   - `error.response?.status === 401` —— 后端返回 401（未授权），说明 Access Token 过期
   - `!originalRequest._retry` —— `_retry` 是我们自定义的标志位，防止无限重试（如果刷新后的新 Token 发出去又 401，不再重试，直接失败）
 
-- `return new Promise((resolve, reject) => {...})` —— **把异步刷新包装成一个 Promise 返回**。这是关键技巧——Axios 的拦截器期望返回 Promise，这样调用 `api.post()` 的代码就不用额外处理重试逻辑
+- `return new Promise((resolve, reject) => {...})` —— **把异步刷新包装成一个 Promise 返回**。这是关键技巧——Axios 的拦截器期望返回 Promise，这样调用 `api.post()` 的代码就不用额外处理重试逻辑。（什么是Promise？JavaScript中处理异步操作的核心机制。简单说，Promise就是一个"承诺"——"我现在还不知道结果，但我承诺未来一定会给你一个答复"。比如你打电话订外卖就是异步的：你打电话下单（发起请求），餐厅说"好的，我们承诺30分钟后送到"，你挂了电话继续看电视（代码继续执行），30分钟后外卖到了（Promise完成），你开门取餐（处理结果）。你不需要一直举着电话等30分钟。在代码里，`new Promise((resolve, reject) => {...})`创建了一个承诺——内部操作成功时调用`resolve(结果)`通知外面"搞定了"，失败时调用`reject(错误)`通知外面"出问题了"。`.then(res => ...)`就是"等承诺兑现后做什么"，`.catch(err => ...)`就是"等承诺失败后做什么"）
 
 - 回调内部 `resolve(api(originalRequest))` —— 用新 Token 重新执行原始请求，成功后 resolve 给原始调用者
 
@@ -205,7 +291,7 @@ api.interceptors.response.use(
 
 ---
 
-## 五、Store 初始值改为空
+## 七、Store 初始值改为空
 
 **文件**：`stores/user.js`
 
@@ -226,7 +312,7 @@ api.interceptors.response.use(
 
 ---
 
-## 六、登录页——`LoginIndex.vue`
+## 八、登录页——`LoginIndex.vue`
 
 **新增 Script**：
 
@@ -266,7 +352,7 @@ async function handleLogin() {
 
 - `const username = ref('')` —— 定义响应式变量，和输入框绑定
 - `username.value.trim()` —— `trim()` 去掉首尾空白字符。`"  "` → `""`
-- `async function handleLogin()` —— `async` 表示函数内部可以用 `await` 等待异步操作
+- `async function handleLogin()` —— `async` 表示函数内部可以用 `await` 等待异步操作。（什么是async/await？这是Promise的"语法糖"——让异步代码读起来像同步代码一样流畅。没有async/await时，你要写`api.post(...).then(res => { ... }).catch(err => { ... })`这种链式调用，嵌套多了很难读。有了async/await，你写`const res = await api.post(...)`——看起来就像普通赋值语句，但`await`的实际意思是"暂停这个函数的执行，等Promise出结果了再继续往下走"。函数外的代码不受影响，继续运行。`async`标志告诉JavaScript"这个函数里有await，请按异步模式处理我"。注意：`await`只能在`async`函数内部使用，普通函数里写`await`会报语法错误）
 - `await api.post('/api/user/account/login/', {username: ..., password: ...})` —— 发 POST 请求。`api` 是我们封装的 Axios 实例，自动走拦截器；第二个参数是请求体（JSON 格式）
 - `user.setAccessToken(data.access)` —— 把 Access Token 存到 Store
 - `user.setUserInfo(data)` —— 把用户信息存到 Store
@@ -290,7 +376,7 @@ async function handleLogin() {
 
 ---
 
-## 七、注册页——`RegisterIndex.vue`
+## 九、注册页——`RegisterIndex.vue`
 
 与登录页几乎一样，多了：
 - `const passwordConfirmed = ref('')` —— 确认密码变量
@@ -299,7 +385,7 @@ async function handleLogin() {
 
 ---
 
-## 八、退出登录——`UserMenu.vue`
+## 十、退出登录——`UserMenu.vue`
 
 ```javascript
 async function handleLogout() {
@@ -319,7 +405,7 @@ async function handleLogout() {
 
 ---
 
-## 九、总结
+## 十一、总结
 
 | 新增/修改 | 作用 |
 |-----------|------|

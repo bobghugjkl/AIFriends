@@ -30,8 +30,40 @@ function reset() {
 
 监听 `route.params.user_id` 变化 → 清空所有状态 → 重新加载。`userProfile` 要先设为 `null`，让 `UserInfoField` 的 `v-if` 隐藏旧信息，防止"闪烁旧数据"。
 
+
+## 二、使用了什么技术
+
+| 技术 | 用途 |
+|------|------|
+| Vue `watch` on `route.params` | 监听路由参数变化，检测用户切换 |
+| 响应式状态重置模式 | 清空所有状态数据后重新加载，避免显示旧数据 |
+
+## 三、整体架构 / 数据流
+
+```
+URL change (/user/space/1 → /user/space/2)
+       │
+       ▼
+Vue Router reuses same component (onMounted won't re-run)
+       │
+       ▼
+watch(route.params.user_id) fires
+       │
+       ▼
+reset()
+       │
+       ├── userProfile = null         ← hides old user info via v-if
+       ├── characters = []
+       ├── isLoading = false
+       ├── hasCharacters = true
+       └── loadMore()                 ← fetch data for new user
+       │
+       ▼
+Component displays fresh data for user 2
+```
+
 ---
 
-## 二、Rollup 版本升级
+## 四、Rollup 版本升级
 
 `package-lock.json` 中 Rollup 从 4.56.0 → 4.59.0。这是 Vite 的底层打包工具的版本更新，不影响代码。

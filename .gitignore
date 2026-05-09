@@ -8,3 +8,4 @@ static/
 .venv
 *.env
 backend/web/documents/
+frontend/public/vad/
