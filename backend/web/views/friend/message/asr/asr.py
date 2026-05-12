@@ -59,7 +59,7 @@ class ASRView(APIView):
 
     async def run_asr_tasks(self, pcm_data):
         task_id = uuid.uuid4().hex
-        api_key = "sk-70cbd483a9ea4418ac1edb50ec155e4b"
+        api_key = os.getenv('OTHER_KEY')
         wss_url = os.getenv('WSS_URL')
         headers = {
             "Authorization": f"Bearer {api_key}"

@@ -1,6 +1,6 @@
 
 from django.urls import path, re_path
-
+from web.views.create.character.voice.get_list import GetVoiceList
 from web.views.create.character.create import CreateCharacterView
 from web.views.create.character.get_list import GetListCharacterView
 from web.views.create.character.get_single import GetSingleCharacterView
@@ -43,6 +43,7 @@ urlpatterns = [
     path('api/friend/message/chat/', MessageChatView.as_view()),
     path('api/friend/message/get_history/', GetHistoryView.as_view()),
     path('api/friend/message/asr/asr/', ASRView.as_view()),
+    path('api/create/character/voice/get_list/', GetVoiceList.as_view()),
 
     path('', index),
 
